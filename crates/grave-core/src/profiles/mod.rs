@@ -1,4 +1,6 @@
+mod burnin;
 mod dataloss;
+mod mold;
 mod static_;
 
 use rand_chacha::ChaCha8Rng;
@@ -22,16 +24,22 @@ pub fn rot_image(
     rng: &mut ChaCha8Rng,
 ) -> Result<(), GraveError> {
     match profile {
+        RotProfile::Mold => {
+            mold::rot_image(rgba, width, height, context, rng);
+            Ok(())
+        }
         RotProfile::Static => {
             static_::rot_image(rgba, width, height, context, rng);
+            Ok(())
+        }
+        RotProfile::BurnIn => {
+            burnin::rot_image(rgba, width, height, context, rng);
             Ok(())
         }
         RotProfile::DataLoss => {
             dataloss::rot_image(rgba, width, height, context, rng);
             Ok(())
         }
-        RotProfile::Mold => Err(GraveError::RenderUnavailable("mold")),
-        RotProfile::BurnIn => Err(GraveError::RenderUnavailable("burnin")),
     }
 }
 
@@ -42,10 +50,10 @@ pub fn rot_text(
     rng: &mut ChaCha8Rng,
 ) -> Result<String, GraveError> {
     match profile {
+        RotProfile::Mold => Ok(mold::rot_text(text, context, rng)),
         RotProfile::Static => Ok(static_::rot_text(text, context, rng)),
+        RotProfile::BurnIn => Ok(burnin::rot_text(text, context, rng)),
         RotProfile::DataLoss => Ok(dataloss::rot_text(text, context, rng)),
-        RotProfile::Mold => Err(GraveError::RenderUnavailable("mold")),
-        RotProfile::BurnIn => Err(GraveError::RenderUnavailable("burnin")),
     }
 }
 

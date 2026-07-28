@@ -2,14 +2,11 @@ use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 use crate::{
-    BuryOptions, GraveError, GraveFlags, GraveHeader, GraveInspection, RotProfile, FORMAT_VERSION,
-    MAGIC_BYTES,
+    BuryOptions, GraveError, GraveFlags, GraveHeader, GraveInspection, MournOutcome, RotProfile,
+    DAY_SECONDS, FORMAT_VERSION, MAGIC_BYTES, MOURNING_WINDOW_DAYS,
 };
 
 const LAST_OPENED_OFFSET: usize = 50;
-const OPEN_COUNT_OFFSET: usize = 58;
-const FLAGS_OFFSET: usize = 63;
-const MOURN_CREDIT_OFFSET: usize = 68;
 const MUTABLE_RANGE_START: usize = LAST_OPENED_OFFSET;
 const MUTABLE_RANGE_END: usize = 72;
 const MAX_DECOMPRESSED_BYTES: usize = 512 * 1024 * 1024;
@@ -82,6 +79,23 @@ pub fn inspect_grave(bytes: &[u8]) -> Result<GraveInspection, GraveError> {
     })
 }
 
+pub fn inspect_grave_file(file: &mut File) -> Result<GraveInspection, GraveError> {
+    let file_len = usize::try_from(file.metadata()?.len()).map_err(|_| GraveError::Truncated)?;
+    let (header_bytes, parsed) = read_header_prefix_from_file(file)?;
+    if file_len < parsed.payload_offset + 8 {
+        return Err(GraveError::Truncated);
+    }
+
+    let stored_header_crc32 = read_trailing_u32(file)?;
+    let computed_header_crc32 = crc32fast::hash(&header_bytes[..parsed.payload_offset]);
+    Ok(GraveInspection {
+        header: parsed.header,
+        disturbed: stored_header_crc32 != computed_header_crc32,
+        compressed_len: (file_len - parsed.payload_offset - 8) as u64,
+        original_len: parsed.original_len,
+    })
+}
+
 pub fn exhume(bytes: &[u8]) -> Result<Vec<u8>, GraveError> {
     let parsed = parse_grave(bytes)?;
     if parsed.header.flags.hardcore() {
@@ -96,33 +110,33 @@ pub fn exhume(bytes: &[u8]) -> Result<Vec<u8>, GraveError> {
 }
 
 pub fn touch(file: &mut File, now: u64) -> Result<(), GraveError> {
-    let (header_bytes, parsed) = read_header_prefix_from_file(file)?;
-    let stored_header_crc32 = read_trailing_u32(file)?;
-    let computed_header_crc32 = crc32fast::hash(&header_bytes[..parsed.payload_offset]);
+    patch_mutable_header(file, now, |header| {
+        header.last_opened = now;
+        header.open_count = header.open_count.saturating_add(1);
+        header.flags.set_mourned_recently(false);
+        ((), true)
+    })
+}
 
-    if stored_header_crc32 != computed_header_crc32 {
-        return Err(GraveError::Disturbed);
-    }
-    if now < parsed.header.buried_at {
-        return Err(GraveError::DateBeforeBurial);
-    }
+pub fn mourn(file: &mut File, now: u64) -> Result<MournOutcome, GraveError> {
+    patch_mutable_header(file, now, |header| {
+        let mourning_window = MOURNING_WINDOW_DAYS.saturating_mul(DAY_SECONDS);
+        if header.flags.mourned_recently()
+            && now.saturating_sub(header.last_opened) < mourning_window
+        {
+            return (MournOutcome::AlreadyMournedRecently, false);
+        }
 
-    let new_open_count = parsed.header.open_count.saturating_add(1);
-    let mut header_bytes = header_bytes[..parsed.payload_offset].to_vec();
-    header_bytes[LAST_OPENED_OFFSET..LAST_OPENED_OFFSET + 8].copy_from_slice(&now.to_le_bytes());
-    header_bytes[OPEN_COUNT_OFFSET..OPEN_COUNT_OFFSET + 4]
-        .copy_from_slice(&new_open_count.to_le_bytes());
-    header_bytes[FLAGS_OFFSET] = parsed.header.flags.bits();
-    header_bytes[MOURN_CREDIT_OFFSET..MOURN_CREDIT_OFFSET + 4]
-        .copy_from_slice(&parsed.header.mourn_credit.to_le_bytes());
-    let new_header_crc32 = crc32fast::hash(&header_bytes);
-
-    file.seek(SeekFrom::Start(MUTABLE_RANGE_START as u64))?;
-    file.write_all(&header_bytes[MUTABLE_RANGE_START..MUTABLE_RANGE_END])?;
-    file.seek(SeekFrom::End(-4))?;
-    file.write_all(&new_header_crc32.to_le_bytes())?;
-    file.sync_data()?;
-    Ok(())
+        header.last_opened = now;
+        header.mourn_credit = header.mourn_credit.saturating_add(1).min(20);
+        header.flags.set_mourned_recently(true);
+        (
+            MournOutcome::PaidRespects {
+                mourn_credit: header.mourn_credit,
+            },
+            true,
+        )
+    })
 }
 
 pub(crate) fn parse_grave(bytes: &[u8]) -> Result<ParsedGrave<'_>, GraveError> {
@@ -313,6 +327,39 @@ fn read_trailing_u32(file: &mut File) -> Result<u32, GraveError> {
     Ok(u32::from_le_bytes(raw))
 }
 
+fn patch_mutable_header<T, F>(file: &mut File, now: u64, mutate: F) -> Result<T, GraveError>
+where
+    F: FnOnce(&mut GraveHeader) -> (T, bool),
+{
+    let (header_bytes, parsed) = read_header_prefix_from_file(file)?;
+    let stored_header_crc32 = read_trailing_u32(file)?;
+    let computed_header_crc32 = crc32fast::hash(&header_bytes[..parsed.payload_offset]);
+
+    if stored_header_crc32 != computed_header_crc32 {
+        return Err(GraveError::Disturbed);
+    }
+
+    let mut header = parsed.header;
+    if now < header.buried_at {
+        return Err(GraveError::DateBeforeBurial);
+    }
+
+    let (result, changed) = mutate(&mut header);
+    if !changed {
+        return Ok(result);
+    }
+
+    let header_bytes = serialize_header_without_payload(&header, parsed.original_len)?;
+    let new_header_crc32 = crc32fast::hash(&header_bytes);
+
+    file.seek(SeekFrom::Start(MUTABLE_RANGE_START as u64))?;
+    file.write_all(&header_bytes[MUTABLE_RANGE_START..MUTABLE_RANGE_END])?;
+    file.seek(SeekFrom::End(-4))?;
+    file.write_all(&new_header_crc32.to_le_bytes())?;
+    file.sync_data()?;
+    Ok(result)
+}
+
 pub(crate) fn decompress_payload(payload: &[u8], expected_len: u64) -> Result<Vec<u8>, GraveError> {
     let expected_len = usize::try_from(expected_len).map_err(|_| GraveError::PayloadTooLarge {
         limit: MAX_DECOMPRESSED_BYTES,
@@ -352,8 +399,8 @@ mod tests {
     use rand_core::{RngCore, SeedableRng};
     use tempfile::NamedTempFile;
 
-    use super::{bury, exhume, inspect_grave, read_header, touch};
-    use crate::{BuryOptions, RotProfile, FORMAT_VERSION};
+    use super::{bury, exhume, inspect_grave, inspect_grave_file, mourn, read_header, touch};
+    use crate::{BuryOptions, MournOutcome, RotProfile, DAY_SECONDS, FORMAT_VERSION};
 
     fn options() -> BuryOptions {
         BuryOptions {
@@ -413,6 +460,21 @@ mod tests {
     }
 
     #[test]
+    fn inspect_grave_file_matches_in_memory_inspection() {
+        let bytes = bury(b"memento", options()).expect("bury");
+        let temp = NamedTempFile::new().expect("tempfile");
+        std::fs::write(temp.path(), &bytes).expect("write");
+
+        let inspection = {
+            let mut file = temp.reopen().expect("reopen");
+            inspect_grave_file(&mut file).expect("inspect file")
+        };
+        let from_bytes = inspect_grave(&bytes).expect("inspect bytes");
+
+        assert_eq!(inspection, from_bytes);
+    }
+
+    #[test]
     fn highly_compressible_payload_still_buries() {
         let input = vec![b'A'; 512 * 1024];
         let bytes = bury(&input, options()).expect("bury");
@@ -440,6 +502,60 @@ mod tests {
         let inspection = inspect_grave(&updated).expect("inspection");
         assert_eq!(inspection.header.open_count, 1);
         assert_eq!(inspection.header.last_opened, 1_722_300_000);
+    }
+
+    #[test]
+    fn mourning_is_rate_limited_for_a_week() {
+        let bytes = bury(b"small", options()).expect("bury");
+        let temp = NamedTempFile::new().expect("tempfile");
+        std::fs::write(temp.path(), &bytes).expect("write");
+
+        {
+            let mut file = temp.reopen().expect("reopen");
+            let outcome = mourn(&mut file, 1_722_211_200).expect("first mourn");
+            assert_eq!(outcome, MournOutcome::PaidRespects { mourn_credit: 1 });
+        }
+
+        let after_first = std::fs::read(temp.path()).expect("read");
+        let first_inspection = inspect_grave(&after_first).expect("inspection");
+        assert_eq!(first_inspection.header.mourn_credit, 1);
+        assert!(first_inspection.header.flags.mourned_recently());
+
+        {
+            let mut file = temp.reopen().expect("reopen");
+            let outcome = mourn(&mut file, 1_722_211_200 + 3 * DAY_SECONDS).expect("second mourn");
+            assert_eq!(outcome, MournOutcome::AlreadyMournedRecently);
+        }
+
+        let after_second = std::fs::read(temp.path()).expect("read");
+        let second_inspection = inspect_grave(&after_second).expect("inspection");
+        assert_eq!(second_inspection.header.mourn_credit, 1);
+        assert_eq!(
+            second_inspection.header.last_opened,
+            first_inspection.header.last_opened
+        );
+        assert!(second_inspection.header.flags.mourned_recently());
+    }
+
+    #[test]
+    fn opening_clears_recent_mourning_flag() {
+        let bytes = bury(b"small", options()).expect("bury");
+        let temp = NamedTempFile::new().expect("tempfile");
+        std::fs::write(temp.path(), &bytes).expect("write");
+
+        {
+            let mut file = temp.reopen().expect("reopen");
+            mourn(&mut file, 1_722_211_200).expect("mourn");
+        }
+        {
+            let mut file = temp.reopen().expect("reopen");
+            touch(&mut file, 1_722_211_200 + DAY_SECONDS).expect("touch");
+        }
+
+        let updated = std::fs::read(temp.path()).expect("read");
+        let inspection = inspect_grave(&updated).expect("inspection");
+        assert_eq!(inspection.header.open_count, 1);
+        assert!(!inspection.header.flags.mourned_recently());
     }
 
     #[test]

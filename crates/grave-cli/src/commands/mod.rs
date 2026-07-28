@@ -1,6 +1,8 @@
 pub mod bury;
 pub mod exhume;
+pub mod graveyard;
 pub mod inspect;
+pub mod mourn;
 pub mod open;
 
 use std::fmt;

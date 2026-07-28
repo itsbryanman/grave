@@ -2,6 +2,7 @@ use crate::GraveError;
 
 pub const MAGIC_BYTES: [u8; 8] = [0x47, 0x52, 0x41, 0x56, 0x45, 0x00, 0x66, 0x6F];
 pub const FORMAT_VERSION: u16 = 2;
+pub const MOURNING_WINDOW_DAYS: u64 = 7;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BuryOptions {
@@ -37,6 +38,12 @@ pub struct GraveInspection {
     pub disturbed: bool,
     pub compressed_len: u64,
     pub original_len: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MournOutcome {
+    PaidRespects { mourn_credit: u32 },
+    AlreadyMournedRecently,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

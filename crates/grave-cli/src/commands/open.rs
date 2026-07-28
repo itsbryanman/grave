@@ -2,8 +2,12 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 
-use grave_core::{encode_png, render_grave, touch, RenderedPayload, TERMINAL_Q};
+use grave_core::{
+    decay_snapshot, encode_png, inspect_grave_file, render_grave, touch, RenderedPayload,
+    TERMINAL_Q,
+};
 
+use crate::art::headstone_screen;
 use crate::commands::{
     default_open_image_path, ensure_writable, format_date, map_core_error, now_epoch, parse_date,
     CliError,
@@ -11,29 +15,37 @@ use crate::commands::{
 use crate::OpenArgs;
 
 pub fn run(args: OpenArgs) -> Result<(), CliError> {
-    let bytes = fs::read(&args.file).map_err(io_error)?;
     let at = args.at;
     let when = match at.as_deref() {
         Some(value) => parse_date(value)?,
         None => now_epoch(),
     };
 
+    let inspection = {
+        let mut file = std::fs::File::open(&args.file).map_err(io_error)?;
+        inspect_grave_file(&mut file).map_err(map_core_error)?
+    };
+    if !inspection.disturbed {
+        let snapshot = decay_snapshot(&inspection.header, when).map_err(map_core_error)?;
+        if snapshot.q >= TERMINAL_Q {
+            println!("{}", headstone_screen(&inspection.header, when));
+            return Err(CliError::new(
+                67,
+                format!(
+                    "{} has reached terminal decomposition as of {}.",
+                    inspection.header.original_filename,
+                    format_date(when)
+                ),
+            ));
+        }
+    }
+
+    let bytes = fs::read(&args.file).map_err(io_error)?;
     let rendered = render_grave(&bytes, when).map_err(map_core_error)?;
     let text_to_stdout =
         matches!(rendered.payload, RenderedPayload::Text(_)) && args.output.is_none();
     if rendered.disturbed {
         status_line(text_to_stdout, "The grave has been disturbed.");
-    }
-
-    if rendered.snapshot.q >= TERMINAL_Q && !rendered.disturbed {
-        return Err(CliError::new(
-            67,
-            format!(
-                "{} has reached terminal decomposition as of {}.",
-                rendered.header.original_filename,
-                format_date(when)
-            ),
-        ));
     }
 
     match rendered.payload {
