@@ -134,7 +134,7 @@ pub fn quoted(value: &str) -> String {
 
 pub fn decay_bar(q: u32) -> String {
     let slots = 12usize;
-    let filled = ((q as usize * slots) + 9_999) / 10_000;
+    let filled = (q as usize * slots).div_ceil(10_000);
     let mut bar = String::with_capacity(slots);
     for index in 0..slots {
         if index < filled {

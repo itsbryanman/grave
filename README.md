@@ -25,9 +25,9 @@
 for data you have chosen to let go.
 
 [![CI](https://github.com/itsbryanman/grave/actions/workflows/ci.yml/badge.svg)](https://github.com/itsbryanman/grave/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/grave?style=flat-square)](https://crates.io/crates/grave)
 [![License](https://img.shields.io/badge/license-MIT-c9a76c?style=flat-square)](LICENSE)
 [![rustc](https://img.shields.io/badge/rustc-1.87%2B-c07843?style=flat-square)](https://www.rust-lang.org/)
+[![Docker](https://img.shields.io/badge/docker-buildable-2b5797?style=flat-square)](Dockerfile)
 [![decay](https://img.shields.io/badge/decay-inevitable-black?style=flat-square)](spec/RFC-666.md)
 [![graves disturbed](https://img.shields.io/badge/graves%20disturbed-0-brightgreen?style=flat-square)](spec/RFC-666.md)
 [![mourning](https://img.shields.io/badge/mourning-accepted-6b4c8a?style=flat-square)](docs/registry.md)
@@ -45,6 +45,22 @@ The original remains untouched inside the coffin, recoverable at any time.
 
 Unless you buried it in **consecrated ground**. Then it is simply gone, a little more each
 time you look.
+
+```text
+                        .---------------.
+                    .'                 '.
+                  /                     \
+                /                       \
+              |           RIP           |
+              |                         |
+              |   here lies a file      |
+              |   you chose to keep     |
+              |   until you didn't      |
+              |                         |
+              |_________________________|
+            ////////////////////////////\
+          //////////////////////////////\
+```
 
 ```text
 $ grave bury photo.jpg --profile mold --epitaph "she was beautiful once"
@@ -106,6 +122,7 @@ a headstone.
 
 The viewer never writes. That is the **Amber Clause**: watching through glass is
 observation, not disturbance. `last_opened` is not updated, visits are not counted.
+The prebuilt wasm bundle is checked in under [`viewer/pkg`](viewer/pkg).
 
 Rebuild the wasm bundle with:
 

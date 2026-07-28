@@ -137,9 +137,9 @@ fn apply_contrast_crater(rgba: &mut [u8], q: u32) {
     let mean_luma = (total_luma / pixels) as u16;
 
     for pixel in rgba.chunks_exact_mut(4) {
-        for channel in 0..3 {
-            let value = pixel[channel] as u16;
-            pixel[channel] =
+        for channel in pixel.iter_mut().take(3) {
+            let value = *channel as u16;
+            *channel =
                 ((value * (256 - crater_strength) + mean_luma * crater_strength + 128) / 256) as u8;
         }
     }

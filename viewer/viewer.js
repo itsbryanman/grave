@@ -109,9 +109,11 @@ async function loadGrave(file) {
 }
 
 function configureTimeline(header, prognosis) {
-  const buriedDay = Math.floor(header.buried_at / DAY_SECONDS);
-  const prognosisSpan = Math.max(1, prognosis - header.buried_at);
-  const endTimestamp = prognosis + Math.ceil(prognosisSpan * 0.2);
+  const buriedAt = toNumber(header.buried_at);
+  const prognosisAt = toNumber(prognosis);
+  const buriedDay = Math.floor(buriedAt / DAY_SECONDS);
+  const prognosisSpan = Math.max(1, prognosisAt - buriedAt);
+  const endTimestamp = prognosisAt + Math.ceil(prognosisSpan * 0.2);
   const endDay = Math.floor(endTimestamp / DAY_SECONDS);
   const selectedDay = clamp(state.todayDay, buriedDay, endDay);
 
@@ -121,8 +123,8 @@ function configureTimeline(header, prognosis) {
   elements.slider.value = String(selectedDay);
   elements.slider.disabled = false;
 
-  elements.buriedLabel.textContent = `buried ${formatDate(header.buried_at)}`;
-  elements.terminalLabel.textContent = `horizon ${formatDate(prognosis)}`;
+  elements.buriedLabel.textContent = `buried ${formatDate(buriedAt)}`;
+  elements.terminalLabel.textContent = `horizon ${formatDate(prognosisAt)}`;
 
   const tickPosition = percentage(state.todayDay, buriedDay, endDay);
   elements.todayTick.style.left = `${tickPosition}%`;
@@ -150,18 +152,23 @@ async function renderSelectedDay(day) {
 
 function updateFacts(render) {
   const header = render.header;
+  const buriedAt = toNumber(header.buried_at);
+  const lastOpened = toNumber(header.last_opened);
+  const ageDays = toNumber(render.age_days);
+  const neglectDays = toNumber(render.neglect_days);
+  const prognosisAt = toNumber(render.prognosis);
   const qBar = decayBar(render.q);
   const facts = [
     ["Interred", `${header.original_filename} (${header.mimetype})`],
-    ["Buried", `${formatDate(header.buried_at)} (${render.age_days} days ago)`],
-    ["Last visited", `${formatDate(header.last_opened)} (${render.neglect_days} days ago)`],
+    ["Buried", `${formatDate(buriedAt)} (${ageDays} days ago)`],
+    ["Last visited", `${formatDate(lastOpened)} (${neglectDays} days ago)`],
     ["Visits", String(header.open_count)],
     ["Profile", header.profile],
     [
       "Decay",
       `${qBar} ${(render.intensity * 100).toFixed(1)}%${render.disturbed ? " · disturbed" : ""}`,
     ],
-    ["Prognosis", `terminal by ${formatDate(render.prognosis)}`],
+    ["Prognosis", `terminal by ${formatDate(prognosisAt)}`],
     ["Epitaph", header.epitaph ? `"${header.epitaph}"` : "none"],
   ];
 
@@ -186,6 +193,7 @@ function showPayload(render) {
 
   if (render.payload.kind === "text") {
     elements.text.textContent = render.payload.text;
+    elements.text.dataset.hexDump = String(Boolean(render.payload.is_hex_dump));
     elements.text.hidden = false;
     return;
   }
@@ -219,9 +227,13 @@ function drawImage(payload) {
 
 function headstoneSvg(render) {
   const header = render.header;
+  const buriedAt = toNumber(header.buried_at);
+  const prognosisAt = toNumber(render.prognosis);
+  const openCount = toNumber(header.open_count);
+  const mournCredit = toNumber(header.mourn_credit);
   const epitaphLines = wrapWords(header.epitaph ? `"${header.epitaph}"` : "", 18).slice(0, 4);
   const filenameLines = wrapWords(header.original_filename || "unknown", 16).slice(0, 2);
-  const detail = `${visitPhrase(header.open_count)} · ${mournPhrase(header.mourn_credit)}`;
+  const detail = `${visitPhrase(openCount)} · ${mournPhrase(mournCredit)}`;
   return `
     <svg viewBox="0 0 520 640" role="img" aria-label="Terminal headstone">
       <defs>
@@ -236,7 +248,7 @@ function headstoneSvg(render) {
       <path d="M176 522V236c0-51 37-90 84-90s84 39 84 90v286z" fill="rgba(255,255,255,0.08)"></path>
       <text x="260" y="160" text-anchor="middle" font-size="28" fill="#2e241d" font-family="Georgia, serif">✝ RIP</text>
       ${filenameLines.map((line, index) => `<text x="260" y="${236 + index * 34}" text-anchor="middle" font-size="25" fill="#2e241d" font-family="Georgia, serif">${escapeHtml(line)}</text>`).join("")}
-      <text x="260" y="324" text-anchor="middle" font-size="20" fill="#2e241d" font-family="Georgia, serif">${formatYear(header.buried_at)} - ${formatYear(render.prognosis)}</text>
+      <text x="260" y="324" text-anchor="middle" font-size="20" fill="#2e241d" font-family="Georgia, serif">${formatYear(buriedAt)} - ${formatYear(prognosisAt)}</text>
       ${epitaphLines.map((line, index) => `<text x="260" y="${398 + index * 28}" text-anchor="middle" font-size="19" fill="#2e241d" font-family="Georgia, serif">${escapeHtml(line)}</text>`).join("")}
       <text x="260" y="570" text-anchor="middle" font-size="18" fill="#f2e7d8" font-family="'IBM Plex Mono', monospace">This file has reached terminal decomposition.</text>
       <text x="260" y="596" text-anchor="middle" font-size="15" fill="#c7b59e" font-family="'IBM Plex Mono', monospace">${escapeHtml(detail)}</text>
@@ -275,7 +287,7 @@ function percentage(day, minDay, maxDay) {
 }
 
 function endOfDay(day) {
-  return day * DAY_SECONDS + DAY_SECONDS - 1;
+  return BigInt(day * DAY_SECONDS + DAY_SECONDS - 1);
 }
 
 function clamp(value, min, max) {
@@ -283,11 +295,11 @@ function clamp(value, min, max) {
 }
 
 function formatDate(timestamp) {
-  return new Date(timestamp * 1000).toISOString().slice(0, 10);
+  return new Date(toNumber(timestamp) * 1000).toISOString().slice(0, 10);
 }
 
 function formatYear(timestamp) {
-  return new Date(timestamp * 1000).getUTCFullYear();
+  return new Date(toNumber(timestamp) * 1000).getUTCFullYear();
 }
 
 function wrapWords(text, width) {
@@ -322,4 +334,8 @@ function escapeHtml(value) {
 function setStatus(message, isError = false) {
   elements.status.textContent = message;
   elements.status.classList.toggle("is-error", isError);
+}
+
+function toNumber(value) {
+  return typeof value === "bigint" ? Number(value) : value;
 }

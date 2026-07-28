@@ -241,19 +241,19 @@ fn paint_cell(
         for px in x0..x1 {
             let base = (py * width + px) * 4;
             let noise = noise_at(noise_seed, px, py);
-            if tone.fuzzy_edge && tone.edge && noise % 5 == 0 {
+            if tone.fuzzy_edge && tone.edge && noise.is_multiple_of(5) {
                 continue;
             }
 
             blend_pixel(&mut rgba[base..base + 4], tone.color, tone.opacity);
 
-            if tone.speckle && noise % 7 == 0 {
+            if tone.speckle && noise.is_multiple_of(7) {
                 rgba[base] = rgba[base].saturating_sub(6);
                 rgba[base + 1] = rgba[base + 1].saturating_add(4);
                 rgba[base + 2] = rgba[base + 2].saturating_sub(4);
             }
 
-            if tone.spore_dots && noise % 97 == 0 {
+            if tone.spore_dots && noise.is_multiple_of(97) {
                 let spore = 232 + (noise % 24) as u8;
                 rgba[base] = spore;
                 rgba[base + 1] = spore;
@@ -272,7 +272,7 @@ fn blend_pixel(pixel: &mut [u8], target: [u8; 3], opacity: u16) {
 }
 
 fn noise_at(seed: u32, x: usize, y: usize) -> u32 {
-    seed.wrapping_add((x as u32).wrapping_mul(0x45D9_F3B)) ^ (y as u32).wrapping_mul(0x27D4_EB2D)
+    seed.wrapping_add((x as u32).wrapping_mul(0x045D_9F3B)) ^ (y as u32).wrapping_mul(0x27D4_EB2D)
 }
 
 fn render_word_stage(word: &str, stage: u8) -> String {

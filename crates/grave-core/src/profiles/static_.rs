@@ -33,8 +33,8 @@ pub(super) fn rot_image(
     }
 
     let block_size = 16usize;
-    let blocks_w = ((width as usize) + block_size - 1) / block_size;
-    let blocks_h = ((height as usize) + block_size - 1) / block_size;
+    let blocks_w = (width as usize).div_ceil(block_size);
+    let blocks_h = (height as usize).div_ceil(block_size);
     let block_count = (context.q / 700) as usize;
     let block_reference = rgba.to_vec();
     for _ in 0..block_count {
@@ -232,8 +232,8 @@ fn copy_other_block(
     block_size: usize,
     rng: &mut ChaCha8Rng,
 ) {
-    let blocks_w = (width + block_size - 1) / block_size;
-    let blocks_h = (height + block_size - 1) / block_size;
+    let blocks_w = width.div_ceil(block_size);
+    let blocks_h = height.div_ceil(block_size);
     let src_block_x = (rng.next_u32() as usize) % blocks_w;
     let src_block_y = (rng.next_u32() as usize) % blocks_h;
     let src_x0 = src_block_x * block_size;

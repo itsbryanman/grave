@@ -19,12 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --exclude grave-wasm --all-targets -- -D warnings
       - name: Test
-        run: cargo test --offline
+        run: cargo test
 
   wasm:
     name: Wasm
@@ -34,6 +35,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -44,12 +46,14 @@ jobs:
       - name: Run wasm tests
         run: wasm-pack test --node crates/grave-wasm
       - name: Build viewer package
-        run: wasm-pack build crates/grave-wasm --target web --out-dir /home/runner/work/grave/grave/viewer/pkg
+        run: wasm-pack build crates/grave-wasm --target web --out-dir "$RUNNER_TEMP/viewer-pkg"
 
   docker:
     name: Docker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build image
-        run: docker build .
+        run: docker build --tag grave-ci .

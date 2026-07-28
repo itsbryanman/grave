@@ -17,8 +17,8 @@ pub(super) fn rot_image(
     }
 
     let block_size = 32usize;
-    let blocks_w = ((width as usize) + block_size - 1) / block_size;
-    let blocks_h = ((height as usize) + block_size - 1) / block_size;
+    let blocks_w = (width as usize).div_ceil(block_size);
+    let blocks_h = (height as usize).div_ceil(block_size);
     let total_blocks = blocks_w.saturating_mul(blocks_h);
     if total_blocks == 0 {
         return;
@@ -110,7 +110,7 @@ pub(super) fn rot_text(text: &str, context: &RotContext, rng: &mut ChaCha8Rng) -
         let mut rebuilt = String::new();
         for (sentence_index, sentence) in sentences.iter().enumerate() {
             if dead_sentences[sentence_index] {
-                rebuilt.push_str(&format!("[LOST: {} bytes]", sentence.as_bytes().len()));
+                rebuilt.push_str(&format!("[LOST: {} bytes]", sentence.len()));
             } else {
                 rebuilt.push_str(sentence);
             }
@@ -233,7 +233,7 @@ fn dead_clusters(dead: &[bool], blocks_w: usize, blocks_h: usize) -> Vec<Vec<usi
         clusters.push(cluster);
     }
 
-    clusters.sort_by(|left, right| right.len().cmp(&left.len()));
+    clusters.sort_by_key(|cluster| std::cmp::Reverse(cluster.len()));
     clusters
 }
 
