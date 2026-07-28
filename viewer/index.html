@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>grave viewer</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero card">
+      <p class="eyebrow">Viewing Through the Glass</p>
+      <h1>Read a grave without laying a finger on it.</h1>
+      <p class="lede">Drop a <code>.grave</code> file below, scrub through whole days, and watch the rot advance without disturbing the burial record.</p>
+      <label class="dropzone" id="dropzone">
+        <input id="grave-input" type="file" accept=".grave,application/octet-stream">
+        <span class="drop-title">Drop a grave here</span>
+        <span class="drop-subtitle">or choose a file from disk</span>
+      </label>
+      <p class="status" id="status">Loading the chapel tools...</p>
+      <p class="note">Viewing through the glass does not disturb the grave.</p>
+    </section>
+
+    <section class="inspector">
+      <aside class="card panel">
+        <div class="panel-header">
+          <p class="eyebrow">Burial Record</p>
+          <h2 id="record-title">No grave selected</h2>
+        </div>
+        <dl class="facts" id="facts">
+          <div><dt>Interred</dt><dd>Awaiting file</dd></div>
+          <div><dt>Buried</dt><dd>Awaiting file</dd></div>
+          <div><dt>Last visited</dt><dd>Awaiting file</dd></div>
+          <div><dt>Visits</dt><dd>Awaiting file</dd></div>
+          <div><dt>Profile</dt><dd>Awaiting file</dd></div>
+          <div><dt>Decay</dt><dd>Awaiting file</dd></div>
+          <div><dt>Prognosis</dt><dd>Awaiting file</dd></div>
+          <div><dt>Epitaph</dt><dd>Awaiting file</dd></div>
+        </dl>
+      </aside>
+
+      <section class="card preview-card">
+        <div class="scrubber">
+          <div class="scrubber-copy">
+            <p class="eyebrow">Scrubber</p>
+            <h2 id="scrubber-label">Choose a burial to begin</h2>
+          </div>
+          <input id="day-slider" type="range" min="0" max="0" step="1" value="0" disabled>
+          <div class="timeline" id="timeline">
+            <div class="future-region" id="future-region"></div>
+            <div class="today-tick" id="today-tick">today</div>
+          </div>
+          <div class="timeline-labels">
+            <span id="buried-label">buried</span>
+            <span id="current-label">selected day</span>
+            <span id="terminal-label">terminal horizon</span>
+          </div>
+        </div>
+
+        <div class="preview-frame" id="preview-frame">
+          <canvas id="image-preview" hidden></canvas>
+          <pre id="text-preview" hidden></pre>
+          <div id="headstone-preview" hidden></div>
+          <div class="empty-state" id="empty-state">
+            <p>The glass is dark.</p>
+            <p>Select a grave to begin the vigil.</p>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script type="module" src="./viewer.js"></script>
+</body>
+</html>

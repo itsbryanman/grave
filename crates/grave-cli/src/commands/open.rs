@@ -1,11 +1,13 @@
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
+use std::path::Path;
 
 use grave_core::{
-    decay_snapshot, encode_png, inspect_grave_file, render_grave, touch, RenderedPayload,
+    decay_snapshot, encode_png, inspect_grave_file, reinter, render_grave, touch, RenderedPayload,
     TERMINAL_Q,
 };
+use tempfile::NamedTempFile;
 
 use crate::art::headstone_screen;
 use crate::commands::{
@@ -47,6 +49,11 @@ pub fn run(args: OpenArgs) -> Result<(), CliError> {
     if rendered.disturbed {
         status_line(text_to_stdout, "The grave has been disturbed.");
     }
+    let hardcore_payload = if rendered.header.flags.hardcore() {
+        Some(rendered_payload_bytes(&rendered.payload).map_err(map_core_error)?)
+    } else {
+        None
+    };
 
     match rendered.payload {
         RenderedPayload::Image(image) => {
@@ -106,6 +113,11 @@ pub fn run(args: OpenArgs) -> Result<(), CliError> {
         return Ok(());
     }
 
+    if let Some(payload) = hardcore_payload {
+        rewrite_hardcore(&args.file, &bytes, &payload, when)?;
+        return Ok(());
+    }
+
     match OpenOptions::new().read(true).write(true).open(&args.file) {
         Ok(mut file) => match touch(&mut file, when) {
             Ok(()) => {}
@@ -142,4 +154,27 @@ fn status_line(use_stderr: bool, message: impl AsRef<str>) {
     } else {
         println!("{}", message.as_ref());
     }
+}
+
+fn rendered_payload_bytes(payload: &RenderedPayload) -> Result<Vec<u8>, grave_core::GraveError> {
+    match payload {
+        RenderedPayload::Image(image) => encode_png(image),
+        RenderedPayload::Text(text) => Ok(text.body.as_bytes().to_vec()),
+    }
+}
+
+fn rewrite_hardcore(
+    path: &Path,
+    original_bytes: &[u8],
+    payload: &[u8],
+    when: u64,
+) -> Result<(), CliError> {
+    let rewritten = reinter(original_bytes, payload, when).map_err(map_core_error)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = NamedTempFile::new_in(parent).map_err(io_error)?;
+    temp.write_all(&rewritten).map_err(io_error)?;
+    temp.as_file_mut().sync_all().map_err(io_error)?;
+    let (_file, temp_path) = temp.keep().map_err(|error| io_error(error.error))?;
+    fs::rename(&temp_path, path).map_err(io_error)?;
+    Ok(())
 }

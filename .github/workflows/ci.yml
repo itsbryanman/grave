@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  native:
+    name: Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --exclude grave-wasm --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --offline
+
+  wasm:
+    name: Wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Check grave-wasm
+        run: cargo check -p grave-wasm --target wasm32-unknown-unknown
+      - name: Run wasm tests
+        run: wasm-pack test --node crates/grave-wasm
+      - name: Build viewer package
+        run: wasm-pack build crates/grave-wasm --target web --out-dir /home/runner/work/grave/grave/viewer/pkg
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build .

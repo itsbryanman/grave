@@ -40,7 +40,7 @@ pub fn bury(input: &[u8], options: BuryOptions) -> Result<Vec<u8>, GraveError> {
         });
     }
 
-    let compressed = zstd::stream::encode_all(Cursor::new(input), 19)?;
+    let compressed = compress_payload(input)?;
 
     let header = GraveHeader {
         version: FORMAT_VERSION,
@@ -109,6 +109,31 @@ pub fn exhume(bytes: &[u8]) -> Result<Vec<u8>, GraveError> {
     Ok(output)
 }
 
+pub fn reinter(bytes: &[u8], payload: &[u8], now: u64) -> Result<Vec<u8>, GraveError> {
+    let parsed = parse_grave(bytes)?;
+    if now < parsed.header.buried_at {
+        return Err(GraveError::DateBeforeBurial);
+    }
+    if payload.len() > MAX_DECOMPRESSED_BYTES {
+        return Err(GraveError::PayloadTooLarge {
+            limit: MAX_DECOMPRESSED_BYTES,
+        });
+    }
+
+    let compressed = compress_payload(payload)?;
+    let mut header = parsed.header;
+    header.last_opened = now;
+    header.open_count = header.open_count.saturating_add(1);
+    header.flags.set_mourned_recently(false);
+
+    let mut bytes = serialize_header_without_payload(&header, payload.len() as u64)?;
+    let header_crc32 = crc32fast::hash(&bytes);
+    bytes.extend_from_slice(&compressed);
+    bytes.extend_from_slice(&crc32fast::hash(payload).to_le_bytes());
+    bytes.extend_from_slice(&header_crc32.to_le_bytes());
+    Ok(bytes)
+}
+
 pub fn touch(file: &mut File, now: u64) -> Result<(), GraveError> {
     patch_mutable_header(file, now, |header| {
         header.last_opened = now;
@@ -116,6 +141,28 @@ pub fn touch(file: &mut File, now: u64) -> Result<(), GraveError> {
         header.flags.set_mourned_recently(false);
         ((), true)
     })
+}
+
+pub fn touch_bytes(bytes: &[u8], now: u64) -> Result<Vec<u8>, GraveError> {
+    let parsed = parse_grave(bytes)?;
+    if parsed.disturbed {
+        return Err(GraveError::Disturbed);
+    }
+    if now < parsed.header.buried_at {
+        return Err(GraveError::DateBeforeBurial);
+    }
+
+    let mut header = parsed.header;
+    header.last_opened = now;
+    header.open_count = header.open_count.saturating_add(1);
+    header.flags.set_mourned_recently(false);
+
+    let mut updated = serialize_header_without_payload(&header, parsed.original_len)?;
+    let header_crc32 = crc32fast::hash(&updated);
+    updated.extend_from_slice(parsed.payload);
+    updated.extend_from_slice(&parsed.payload_crc32.to_le_bytes());
+    updated.extend_from_slice(&header_crc32.to_le_bytes());
+    Ok(updated)
 }
 
 pub fn mourn(file: &mut File, now: u64) -> Result<MournOutcome, GraveError> {
@@ -327,6 +374,19 @@ fn read_trailing_u32(file: &mut File) -> Result<u32, GraveError> {
     Ok(u32::from_le_bytes(raw))
 }
 
+#[cfg(feature = "native")]
+fn compress_payload(payload: &[u8]) -> Result<Vec<u8>, GraveError> {
+    Ok(zstd::stream::encode_all(Cursor::new(payload), 19)?)
+}
+
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn compress_payload(_payload: &[u8]) -> Result<Vec<u8>, GraveError> {
+    Ok(ruzstd::encoding::compress_to_vec(
+        Cursor::new(_payload),
+        ruzstd::encoding::CompressionLevel::Fastest,
+    ))
+}
+
 fn patch_mutable_header<T, F>(file: &mut File, now: u64, mutate: F) -> Result<T, GraveError>
 where
     F: FnOnce(&mut GraveHeader) -> (T, bool),
@@ -360,6 +420,7 @@ where
     Ok(result)
 }
 
+#[cfg(feature = "native")]
 pub(crate) fn decompress_payload(payload: &[u8], expected_len: u64) -> Result<Vec<u8>, GraveError> {
     let expected_len = usize::try_from(expected_len).map_err(|_| GraveError::PayloadTooLarge {
         limit: MAX_DECOMPRESSED_BYTES,
@@ -393,13 +454,62 @@ pub(crate) fn decompress_payload(payload: &[u8], expected_len: u64) -> Result<Ve
     Ok(output)
 }
 
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+pub(crate) fn decompress_payload(payload: &[u8], expected_len: u64) -> Result<Vec<u8>, GraveError> {
+    let expected_len = usize::try_from(expected_len).map_err(|_| GraveError::PayloadTooLarge {
+        limit: MAX_DECOMPRESSED_BYTES,
+    })?;
+    if expected_len > MAX_DECOMPRESSED_BYTES {
+        return Err(GraveError::PayloadTooLarge {
+            limit: MAX_DECOMPRESSED_BYTES,
+        });
+    }
+
+    let mut decoder = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(
+        Cursor::new(payload),
+        MAX_DECOMPRESSED_BYTES as u64,
+    )
+    .map_err(codec_error)?;
+    let mut output = Vec::with_capacity(expected_len.min(64 * 1024));
+    let mut chunk = [0u8; 8 * 1024];
+
+    loop {
+        let read = decoder.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+
+        if output.len().saturating_add(read) > expected_len {
+            return Err(GraveError::CrcMismatch);
+        }
+        output.extend_from_slice(&chunk[..read]);
+    }
+
+    if output.len() != expected_len {
+        return Err(GraveError::CrcMismatch);
+    }
+
+    Ok(output)
+}
+
+#[cfg(all(feature = "wasm", not(feature = "native")))]
+fn codec_error(error: impl ToString) -> GraveError {
+    GraveError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        error.to_string(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use rand_chacha::ChaCha8Rng;
     use rand_core::{RngCore, SeedableRng};
     use tempfile::NamedTempFile;
 
-    use super::{bury, exhume, inspect_grave, inspect_grave_file, mourn, read_header, touch};
+    use super::{
+        bury, exhume, inspect_grave, inspect_grave_file, mourn, read_header, reinter, touch,
+        touch_bytes,
+    };
     use crate::{BuryOptions, MournOutcome, RotProfile, DAY_SECONDS, FORMAT_VERSION};
 
     fn options() -> BuryOptions {
@@ -556,6 +666,41 @@ mod tests {
         let inspection = inspect_grave(&updated).expect("inspection");
         assert_eq!(inspection.header.open_count, 1);
         assert!(!inspection.header.flags.mourned_recently());
+    }
+
+    #[test]
+    fn touch_bytes_matches_the_file_touch_path() {
+        let bytes = bury(b"small", options()).expect("bury");
+        let from_bytes = touch_bytes(&bytes, 1_722_211_200).expect("touch bytes");
+
+        let temp = NamedTempFile::new().expect("tempfile");
+        std::fs::write(temp.path(), &bytes).expect("write");
+        {
+            let mut file = temp.reopen().expect("reopen");
+            touch(&mut file, 1_722_211_200).expect("touch");
+        }
+        let from_file = std::fs::read(temp.path()).expect("read");
+
+        assert_eq!(from_bytes, from_file);
+    }
+
+    #[test]
+    fn hardcore_reinterment_replaces_the_payload_and_keeps_the_original_burial_date() {
+        let mut options = options();
+        options.hardcore = true;
+        let first = bury(b"first body", options).expect("bury");
+        let second = reinter(&first, b"second body", 1_722_300_000).expect("reinter");
+        let third = reinter(&second, b"third body", 1_722_400_000).expect("reinter");
+
+        let second_inspection = inspect_grave(&second).expect("inspection");
+        let third_inspection = inspect_grave(&third).expect("inspection");
+
+        assert_eq!(second_inspection.header.buried_at, 1_722_124_800);
+        assert_eq!(third_inspection.header.buried_at, 1_722_124_800);
+        assert_ne!(first, second);
+        assert_ne!(second, third);
+        assert_eq!(second_inspection.header.open_count, 1);
+        assert_eq!(third_inspection.header.open_count, 2);
     }
 
     #[test]

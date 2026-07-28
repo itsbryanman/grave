@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "The command-line groundskeeper for .grave files"
 
 [[bin]]
 name = "grave"
@@ -14,6 +15,12 @@ anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 comfy-table.workspace = true
+dialoguer.workspace = true
 grave-core = { path = "../grave-core" }
 rand.workspace = true
+tempfile.workspace = true
 
+[dev-dependencies]
+grave-core = { path = "../grave-core" }
+sha2.workspace = true
+tempfile.workspace = true

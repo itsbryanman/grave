@@ -4,20 +4,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Core container, decay, and rendering logic for .grave files"
 
 [features]
 default = ["native"]
-native = ["dep:image"]
-wasm = []
+native = ["dep:image", "dep:zstd"]
+wasm = ["dep:image", "dep:ruzstd"]
 
 [dependencies]
 crc32fast.workspace = true
 image = { workspace = true, optional = true }
 rand_chacha.workspace = true
 rand_core.workspace = true
+ruzstd = { workspace = true, optional = true }
 sha2.workspace = true
 thiserror.workspace = true
-zstd.workspace = true
+zstd = { workspace = true, optional = true }
 
 [dev-dependencies]
 sha2.workspace = true

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use dialoguer::Input;
 use grave_core::{bury, prognosis, read_header, BuryOptions};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -18,6 +19,9 @@ pub fn run(args: BuryArgs) -> Result<(), CliError> {
         .clone()
         .unwrap_or_else(|| default_grave_path(&args.file));
     ensure_writable(&output, args.force)?;
+    if args.hardcore {
+        confirm_hardcore(&args.file)?;
+    }
 
     let mut burial_id = [0u8; 32];
     OsRng.fill_bytes(&mut burial_id);
@@ -71,4 +75,23 @@ fn original_filename(path: &Path) -> String {
 
 fn io_error(error: std::io::Error) -> CliError {
     CliError::new(1, error.to_string())
+}
+
+fn confirm_hardcore(path: &Path) -> Result<(), CliError> {
+    let filename = original_filename(path);
+    eprintln!(
+        "Hardcore burial permanently replaces the grave's contents every time it is opened. Exhumation will be refused, terminal decomposition will be final, and recovery will not be possible once the file is rewritten."
+    );
+    let typed = Input::<String>::new()
+        .with_prompt(format!("Type '{filename}' to continue"))
+        .interact_text()
+        .map_err(|error| CliError::new(1, error.to_string()))?;
+    if typed == filename {
+        Ok(())
+    } else {
+        Err(CliError::new(
+            1,
+            "The grave rejected the oath. Hardcore burial was cancelled.",
+        ))
+    }
 }

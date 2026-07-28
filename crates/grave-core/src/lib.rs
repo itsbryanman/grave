@@ -2,13 +2,16 @@ mod container;
 mod decay;
 mod error;
 mod model;
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "wasm"))]
 mod profiles;
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "wasm"))]
 mod render;
 pub mod rng;
 
-pub use container::{bury, exhume, inspect_grave, inspect_grave_file, mourn, read_header, touch};
+pub use container::{
+    bury, exhume, inspect_grave, inspect_grave_file, mourn, read_header, reinter, touch,
+    touch_bytes,
+};
 pub use decay::{
     decay_snapshot, inspect_decay_snapshot, prognosis, DecaySnapshot, DAY_SECONDS,
     TERMINAL_INTENSITY, TERMINAL_Q,
@@ -18,7 +21,7 @@ pub use model::{
     BuryOptions, GraveFlags, GraveHeader, GraveInspection, MournOutcome, RotProfile,
     FORMAT_VERSION, MAGIC_BYTES, MOURNING_WINDOW_DAYS,
 };
-#[cfg(feature = "native")]
+#[cfg(any(feature = "native", feature = "wasm"))]
 pub use render::{
     encode_png, render_grave, RenderResult, RenderedImage, RenderedPayload, RenderedText,
 };

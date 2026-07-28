@@ -24,11 +24,13 @@ pub enum GraveError {
     Disturbed,
     #[error("The {0} rite has not yet taken hold here.")]
     RenderUnavailable(&'static str),
+    #[error("This build cannot {0}.")]
+    CodecUnavailable(&'static str),
     #[error("The dead do not return from consecrated ground.")]
     Hardcore,
     #[error("Nothing was here yet.")]
     DateBeforeBurial,
-    #[cfg(feature = "native")]
+    #[cfg(any(feature = "native", feature = "wasm"))]
     #[error(transparent)]
     Image(#[from] image::ImageError),
     #[error(transparent)]
