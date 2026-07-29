@@ -1,11 +1,12 @@
 mod art;
 mod commands;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{error::ErrorKind, Parser, Subcommand, ValueEnum};
 use commands::CliError;
 
 #[derive(Parser, Debug)]
 #[command(name = "grave")]
+#[command(version)]
 #[command(about = "A professional-grade volatile retention format.")]
 struct Cli {
     #[command(subcommand)]
@@ -116,7 +117,16 @@ fn main() {
 }
 
 fn run() -> Result<(), CliError> {
-    let cli = Cli::try_parse().map_err(|error| CliError::usage(error.to_string()))?;
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => match error.kind() {
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                print!("{error}");
+                return Ok(());
+            }
+            _ => return Err(CliError::usage(error.to_string())),
+        },
+    };
     match cli.command {
         Command::Bury(args) => commands::bury::run(args),
         Command::Open(args) => commands::open::run(args),
