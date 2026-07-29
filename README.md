@@ -1,27 +1,27 @@
 <div align="center">
 
 ```text
-                                      ▲
-                          ┌───────────┴───────────┐
-              .  *        │      ✝  R I P  ✝      │        .      *
-        *                 │                       │
-                 .        │   here lies a file    │   *        .
-                          │   you chose to keep   │
-            .             │   until you didn't    │          .
-   _____ ____  _____ _  __│_______________________│_______ _____ ____
-  ///////////////////////////////////////////////////////////////////
+           .       *
+       .-----------------------.
+       |      +  R I P  +      |
+   *   |                       |   .
+       |   here lies a file    |
+       |   you chose to keep   |
+       |   until you didn't    |
+       '-----------------------'
+     _______/_________\_______
+    ///////////////////////////
 
-   ██████╗ ██████╗  █████╗ ██╗   ██╗███████╗
-  ██╔════╝ ██╔══██╗██╔══██╗██║   ██║██╔════╝
-  ██║  ███╗██████╔╝███████║██║   ██║█████╗
-  ██║   ██║██╔══██╗██╔══██║╚██╗ ██╔╝██╔══╝
-  ╚██████╔╝██║  ██║██║  ██║ ╚████╔╝ ███████╗
-   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝
+  ____ ____      _    __     _______
+ / ___|  _ \    / \   \ \   / / ____|
+| |  _| |_) |  / _ \   \ \ / /|  _|
+| |_| |  _ <  / ___ \   \ V / | |___
+ \____|_| \_\/_/   \_\   \_/  |_____|
 ```
 
 ### a file format with a lifespan
 
-**GRAVE** is a professional-grade volatile retention format
+**GRAVE** is a professional-grade volatile retention format  
 for data you have chosen to let go.
 
 [![CI](https://github.com/itsbryanman/grave/actions/workflows/ci.yml/badge.svg)](https://github.com/itsbryanman/grave/actions/workflows/ci.yml)
