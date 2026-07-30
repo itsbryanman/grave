@@ -31,11 +31,13 @@ for data you have chosen to let go.
 [![decay](https://img.shields.io/badge/decay-inevitable-black?style=flat-square)](spec/RFC-666.md)
 [![graves disturbed](https://img.shields.io/badge/graves%20disturbed-0-brightgreen?style=flat-square)](spec/RFC-666.md)
 [![mourning](https://img.shields.io/badge/mourning-accepted-6b4c8a?style=flat-square)](docs/registry.md)
-[![wasm](https://img.shields.io/badge/wasm-consecrated-4a5d43?style=flat-square)](viewer/index.html)
+[![wasm](https://img.shields.io/badge/wasm-consecrated-4a5d43?style=flat-square)](https://itsbryanman.github.io/grave/)
 
 </div>
 
 ---
+
+**Live viewer:** [itsbryanman.github.io/grave](https://itsbryanman.github.io/grave/)
 
 Every `.grave` file decays. Deterministically. On a schedule you set at burial, accelerated
 by neglect, worn slightly by every visit, and slowed — never stopped — by mourning. Two
@@ -115,14 +117,16 @@ Rot is computed, never stored. See [RFC-666 §4](spec/RFC-666.md).
 
 ## Visiting Hours
 
-The browser viewer lives in [`viewer/`](viewer/index.html) — drag a `.grave` onto it,
-read the stone, and scrub the slider from burial day to the terminal horizon to watch
-the decay unfold. The future side of the scrubber is tinted. The terminal position is
-a headstone.
+The browser viewer is live at [itsbryanman.github.io/grave](https://itsbryanman.github.io/grave/) —
+drag a `.grave` onto it, read the stone, and scrub the slider from burial day to the
+terminal horizon to watch the decay unfold. The future side of the scrubber is tinted.
+The terminal position is a headstone. The same files also live locally in
+[`viewer/`](viewer/index.html).
 
 The viewer never writes. That is the **Amber Clause**: watching through glass is
 observation, not disturbance. `last_opened` is not updated, visits are not counted.
-The prebuilt wasm bundle is checked in under [`viewer/pkg`](viewer/pkg).
+The prebuilt wasm bundle is checked in under [`viewer/pkg`](viewer/pkg) for local use, but
+the Pages workflow rebuilds that bundle fresh before publishing.
 
 Rebuild the wasm bundle with:
 
