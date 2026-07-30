@@ -4,10 +4,35 @@ use rand_core::RngCore;
 use super::RotContext;
 
 const BLOCK_SIZE: usize = 8;
-const SPREAD_THRESHOLD: u32 = 1_800;
-const YOUNG_COLOR: [u8; 3] = [0x2a, 0x3d, 0x24];
-const MATURE_COLOR: [u8; 3] = [0x14, 0x1f, 0x10];
-const OLD_COLOR: [u8; 3] = [0x0a, 0x0d, 0x08];
+const SPREAD_THRESHOLD: i32 = 900;
+const SPREAD_FIELD_STEP: usize = 5;
+const SPREAD_BIAS_RANGE: i32 = 1_200;
+const ACTIVE_SPREAD_BASE_DAYS: usize = 8;
+const EDGE_FADE_DISTANCE: i16 = 5;
+const HALO_FADE_DISTANCE: i16 = 7;
+const YOUNG_COLOR: [u8; 3] = [0x76, 0x8f, 0x5b];
+const MATURE_COLOR: [u8; 3] = [0x4a, 0x62, 0x3c];
+const OLD_COLOR: [u8; 3] = [0x23, 0x33, 0x1d];
+
+const NORTH: u8 = 1 << 0;
+const NORTHEAST: u8 = 1 << 1;
+const EAST: u8 = 1 << 2;
+const SOUTHEAST: u8 = 1 << 3;
+const SOUTH: u8 = 1 << 4;
+const SOUTHWEST: u8 = 1 << 5;
+const WEST: u8 = 1 << 6;
+const NORTHWEST: u8 = 1 << 7;
+
+const NEIGHBOR_STEPS: [(isize, isize, u8); 8] = [
+    (0, -1, NORTH),
+    (1, -1, NORTHEAST),
+    (1, 0, EAST),
+    (1, 1, SOUTHEAST),
+    (0, 1, SOUTH),
+    (-1, 1, SOUTHWEST),
+    (-1, 0, WEST),
+    (-1, -1, NORTHWEST),
+];
 
 pub(super) fn rot_image(
     rgba: &mut [u8],
@@ -100,6 +125,7 @@ fn simulate_colonies(
         return colonized_at;
     }
 
+    let growth_field = GrowthField::new(cells_w, cells_h, rng);
     let seed_count = (3 + context.q / 1_500) as usize;
     for _ in 0..seed_count.min(total_cells) {
         if let Some(index) = choose_unoccupied_cell(&colonized_at, rng) {
@@ -122,13 +148,18 @@ fn simulate_colonies(
                 if start_day as usize >= day {
                     continue;
                 }
+                if day.saturating_sub(start_day as usize)
+                    > active_spread_window(&growth_field, x, y)
+                {
+                    continue;
+                }
 
                 for (nx, ny) in neighbors_8(x, y, cells_w, cells_h) {
                     let next = ny * cells_w + nx;
                     if colonized_at[next].is_some() || pending_marks[next] {
                         continue;
                     }
-                    if rng.next_u32() % 10_000 < SPREAD_THRESHOLD {
+                    if rng.next_u32() % 10_000 < spread_threshold_for_cell(&growth_field, nx, ny) {
                         pending.push(next);
                         pending_marks[next] = true;
                     }
@@ -165,20 +196,11 @@ fn neighbors_8(
     width: usize,
     height: usize,
 ) -> impl Iterator<Item = (usize, usize)> {
-    let mut neighbors = Vec::with_capacity(8);
-    let y_start = y.saturating_sub(1);
-    let y_end = (y + 1).min(height.saturating_sub(1));
-    let x_start = x.saturating_sub(1);
-    let x_end = (x + 1).min(width.saturating_sub(1));
-    for ny in y_start..=y_end {
-        for nx in x_start..=x_end {
-            if nx == x && ny == y {
-                continue;
-            }
-            neighbors.push((nx, ny));
-        }
-    }
-    neighbors.into_iter()
+    NEIGHBOR_STEPS.into_iter().filter_map(move |(dx, dy, _)| {
+        let nx = x.checked_add_signed(dx)?;
+        let ny = y.checked_add_signed(dy)?;
+        (nx < width && ny < height).then_some((nx, ny))
+    })
 }
 
 fn simulated_days(age_days: u64) -> usize {
@@ -197,30 +219,56 @@ fn colony_tone(
     let days = simulated_days(age_days);
     if let Some(start_day) = colony_days[index] {
         let maturity = days.saturating_sub(start_day as usize).max(1);
-        let edge = has_empty_neighbor(colony_days, x, y, cells_w, cells_h);
-        return Some(CellTone::for_maturity(maturity, edge, false));
+        let exposed_edges = empty_neighbor_mask(colony_days, x, y, cells_w, cells_h);
+        return Some(CellTone::for_maturity(maturity, exposed_edges));
     }
 
     let mut strongest_neighbor: Option<usize> = None;
-    for (nx, ny) in neighbors_8(x, y, cells_w, cells_h) {
+    let mut contact_edges = 0u8;
+    for (dx, dy, mask) in NEIGHBOR_STEPS {
+        let Some(nx) = x.checked_add_signed(dx) else {
+            continue;
+        };
+        let Some(ny) = y.checked_add_signed(dy) else {
+            continue;
+        };
+        if nx >= cells_w || ny >= cells_h {
+            continue;
+        }
         let Some(start_day) = colony_days[ny * cells_w + nx] else {
             continue;
         };
         let maturity = days.saturating_sub(start_day as usize).max(1);
         strongest_neighbor = Some(strongest_neighbor.map_or(maturity, |best| best.max(maturity)));
+        contact_edges |= mask;
     }
 
-    strongest_neighbor.map(|maturity| CellTone::for_maturity(maturity, false, true))
+    strongest_neighbor.map(|maturity| CellTone::for_halo(maturity, contact_edges))
 }
 
-fn has_empty_neighbor(
+fn empty_neighbor_mask(
     colony_days: &[Option<u16>],
     x: usize,
     y: usize,
     cells_w: usize,
     cells_h: usize,
-) -> bool {
-    neighbors_8(x, y, cells_w, cells_h).any(|(nx, ny)| colony_days[ny * cells_w + nx].is_none())
+) -> u8 {
+    let mut mask = 0u8;
+    for (dx, dy, direction) in NEIGHBOR_STEPS {
+        let Some(nx) = x.checked_add_signed(dx) else {
+            continue;
+        };
+        let Some(ny) = y.checked_add_signed(dy) else {
+            continue;
+        };
+        if nx >= cells_w || ny >= cells_h {
+            continue;
+        }
+        if colony_days[ny * cells_w + nx].is_none() {
+            mask |= direction;
+        }
+    }
+    mask
 }
 
 fn paint_cell(
@@ -236,38 +284,65 @@ fn paint_cell(
     let y0 = cell_y * BLOCK_SIZE;
     let x1 = (x0 + BLOCK_SIZE).min(width);
     let y1 = (y0 + BLOCK_SIZE).min(height);
+    let cell_width = x1.saturating_sub(x0);
+    let cell_height = y1.saturating_sub(y0);
 
     for py in y0..y1 {
         for px in x0..x1 {
             let base = (py * width + px) * 4;
             let noise = noise_at(noise_seed, px, py);
-            if tone.fuzzy_edge && tone.edge && noise.is_multiple_of(5) {
+            let edge_opacity = if tone.halo {
+                halo_coverage(
+                    tone.edge_mask,
+                    px - x0,
+                    py - y0,
+                    cell_width,
+                    cell_height,
+                    noise_seed,
+                )
+            } else {
+                colony_coverage(
+                    tone.edge_mask,
+                    px - x0,
+                    py - y0,
+                    cell_width,
+                    cell_height,
+                    noise_seed,
+                )
+            };
+            let opacity = scale_opacity(tone.opacity, edge_opacity);
+            if opacity == 0 {
                 continue;
             }
 
-            blend_pixel(&mut rgba[base..base + 4], tone.color, tone.opacity);
+            blend_pixel(&mut rgba[base..base + 4], tone.color, opacity);
 
-            if tone.speckle && noise.is_multiple_of(7) {
-                rgba[base] = rgba[base].saturating_sub(6);
-                rgba[base + 1] = rgba[base + 1].saturating_add(4);
-                rgba[base + 2] = rgba[base + 2].saturating_sub(4);
+            if !tone.halo && tone.speckle_chance > 0 && noise % 10_000 < tone.speckle_chance {
+                rgba[base] = rgba[base].saturating_sub(5);
+                rgba[base + 1] = rgba[base + 1].saturating_add(7);
+                rgba[base + 2] = rgba[base + 2].saturating_sub(3);
             }
 
-            if tone.spore_dots && noise.is_multiple_of(97) {
-                let spore = 232 + (noise % 24) as u8;
-                rgba[base] = spore;
+            if !tone.halo && tone.spore_chance > 0 && noise % 10_000 < tone.spore_chance {
+                let spore = 168 + (noise % 48) as u8;
+                rgba[base] = spore.saturating_sub(18);
                 rgba[base + 1] = spore;
-                rgba[base + 2] = spore;
+                rgba[base + 2] = spore.saturating_sub(34);
             }
         }
     }
 }
 
 fn blend_pixel(pixel: &mut [u8], target: [u8; 3], opacity: u16) {
+    let luminance = pixel_luminance(pixel);
+    let desaturate_amount = 96 + opacity / 2;
+    let shadow_luminance = scale_channel(luminance, 216u16.saturating_sub(opacity / 2));
+    let tint_amount = 120 + opacity / 3;
+
     for channel in 0..3 {
-        let source = pixel[channel] as u16;
-        let mixed = (source * (256 - opacity) + target[channel] as u16 * opacity + 128) / 256;
-        pixel[channel] = mixed as u8;
+        let muted = mix_channel(pixel[channel], luminance, desaturate_amount);
+        let tinted = mix_channel(shadow_luminance, target[channel], tint_amount);
+        pixel[channel] = mix_channel(muted, tinted, opacity);
     }
 }
 
@@ -346,29 +421,280 @@ enum Token {
 struct CellTone {
     color: [u8; 3],
     opacity: u16,
-    edge: bool,
-    fuzzy_edge: bool,
-    speckle: bool,
-    spore_dots: bool,
+    edge_mask: u8,
+    halo: bool,
+    speckle_chance: u32,
+    spore_chance: u32,
 }
 
 impl CellTone {
-    fn for_maturity(maturity: usize, edge: bool, feathered: bool) -> Self {
-        let (color, opacity, fuzzy_edge, speckle, spore_dots) = if maturity <= 5 {
-            (YOUNG_COLOR, 64u16, false, true, false)
-        } else if maturity <= 20 {
-            (MATURE_COLOR, 154u16, true, false, false)
-        } else {
-            (OLD_COLOR, 214u16, false, false, true)
-        };
+    fn for_maturity(maturity: usize, edge_mask: u8) -> Self {
+        let (color, opacity, late_stage) = tone_curve(maturity);
+        let speckle_chance = 240 + u32::from(256u16.saturating_sub(late_stage)) * 3;
+        let spore_chance = u32::from(late_stage) * 2;
 
         Self {
             color,
-            opacity: if feathered { opacity / 2 } else { opacity },
-            edge,
-            fuzzy_edge,
-            speckle,
-            spore_dots,
+            opacity,
+            edge_mask,
+            halo: false,
+            speckle_chance,
+            spore_chance,
         }
     }
+
+    fn for_halo(maturity: usize, edge_mask: u8) -> Self {
+        let (color, opacity, _) = tone_curve(maturity);
+
+        Self {
+            color,
+            opacity: opacity / 3,
+            edge_mask,
+            halo: true,
+            speckle_chance: 0,
+            spore_chance: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct GrowthField {
+    values: Vec<u16>,
+    width: usize,
+    height: usize,
+}
+
+impl GrowthField {
+    fn new(cells_w: usize, cells_h: usize, rng: &mut ChaCha8Rng) -> Self {
+        let width = cells_w.div_ceil(SPREAD_FIELD_STEP) + 1;
+        let height = cells_h.div_ceil(SPREAD_FIELD_STEP) + 1;
+        let mut values = Vec::with_capacity(width.saturating_mul(height));
+        for _ in 0..width.saturating_mul(height) {
+            values.push((rng.next_u32() % 1_025) as u16);
+        }
+
+        Self {
+            values,
+            width,
+            height,
+        }
+    }
+
+    fn sample(&self, x: usize, y: usize) -> u16 {
+        if self.values.is_empty() {
+            return 512;
+        }
+
+        let sx = (x / SPREAD_FIELD_STEP).min(self.width.saturating_sub(1));
+        let sy = (y / SPREAD_FIELD_STEP).min(self.height.saturating_sub(1));
+        let tx = x % SPREAD_FIELD_STEP;
+        let ty = y % SPREAD_FIELD_STEP;
+        let sx1 = (sx + 1).min(self.width.saturating_sub(1));
+        let sy1 = (sy + 1).min(self.height.saturating_sub(1));
+
+        let top = lerp_u16(
+            self.values[sy * self.width + sx],
+            self.values[sy * self.width + sx1],
+            tx,
+            SPREAD_FIELD_STEP,
+        );
+        let bottom = lerp_u16(
+            self.values[sy1 * self.width + sx],
+            self.values[sy1 * self.width + sx1],
+            tx,
+            SPREAD_FIELD_STEP,
+        );
+        lerp_u16(top, bottom, ty, SPREAD_FIELD_STEP)
+    }
+}
+
+fn spread_threshold_for_cell(field: &GrowthField, x: usize, y: usize) -> u32 {
+    let centered = i32::from(field.sample(x, y)) - 512;
+    (SPREAD_THRESHOLD + (centered * SPREAD_BIAS_RANGE) / 512).clamp(120, 2_400) as u32
+}
+
+fn active_spread_window(field: &GrowthField, x: usize, y: usize) -> usize {
+    ACTIVE_SPREAD_BASE_DAYS + usize::from(field.sample(x, y) / 64)
+}
+
+fn tone_curve(maturity: usize) -> ([u8; 3], u16, u16) {
+    let young_to_mature = ramp_between(maturity, 1, 18);
+    let mature_to_old = ramp_between(maturity, 18, 72);
+    let color = mix_color(
+        mix_color(YOUNG_COLOR, MATURE_COLOR, young_to_mature),
+        OLD_COLOR,
+        mature_to_old,
+    );
+    let opacity = if maturity <= 18 {
+        mix_u16(76, 168, young_to_mature)
+    } else {
+        mix_u16(168, 228, mature_to_old)
+    };
+
+    (color, opacity, mature_to_old)
+}
+
+fn ramp_between(value: usize, start: usize, end: usize) -> u16 {
+    if value <= start {
+        return 0;
+    }
+    if value >= end {
+        return 256;
+    }
+
+    (((value - start) * 256) / end.saturating_sub(start).max(1)) as u16
+}
+
+fn colony_coverage(
+    mask: u8,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    noise_seed: u32,
+) -> u16 {
+    if mask == 0 {
+        return 256;
+    }
+
+    let distance = distance_to_edge(mask, x, y, width, height)
+        + edge_variation(noise_seed, x, y, width, height);
+    smoothstep(progress(distance, EDGE_FADE_DISTANCE))
+}
+
+fn halo_coverage(
+    mask: u8,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    noise_seed: u32,
+) -> u16 {
+    if mask == 0 {
+        return 0;
+    }
+
+    let distance = distance_to_edge(mask, x, y, width, height)
+        + edge_variation(noise_seed, x, y, width, height);
+    256u16.saturating_sub(smoothstep(progress(distance, HALO_FADE_DISTANCE)))
+}
+
+fn distance_to_edge(mask: u8, x: usize, y: usize, width: usize, height: usize) -> i16 {
+    let north = y as i16;
+    let south = height.saturating_sub(y + 1) as i16;
+    let west = x as i16;
+    let east = width.saturating_sub(x + 1) as i16;
+    let mut best = i16::MAX;
+
+    if mask & NORTH != 0 {
+        best = best.min(north);
+    }
+    if mask & NORTHEAST != 0 {
+        best = best.min(north.min(east));
+    }
+    if mask & EAST != 0 {
+        best = best.min(east);
+    }
+    if mask & SOUTHEAST != 0 {
+        best = best.min(south.min(east));
+    }
+    if mask & SOUTH != 0 {
+        best = best.min(south);
+    }
+    if mask & SOUTHWEST != 0 {
+        best = best.min(south.min(west));
+    }
+    if mask & WEST != 0 {
+        best = best.min(west);
+    }
+    if mask & NORTHWEST != 0 {
+        best = best.min(north.min(west));
+    }
+
+    if best == i16::MAX {
+        0
+    } else {
+        best
+    }
+}
+
+fn edge_variation(noise_seed: u32, x: usize, y: usize, width: usize, height: usize) -> i16 {
+    let width = width.saturating_sub(1).max(1);
+    let height = height.saturating_sub(1).max(1);
+    let top = lerp_i16(
+        corner_offset(noise_seed, 0),
+        corner_offset(noise_seed, 1),
+        x,
+        width,
+    );
+    let bottom = lerp_i16(
+        corner_offset(noise_seed, 2),
+        corner_offset(noise_seed, 3),
+        x,
+        width,
+    );
+    lerp_i16(top, bottom, y, height)
+}
+
+fn corner_offset(noise_seed: u32, corner: u32) -> i16 {
+    let value = noise_seed.rotate_left(corner * 7 + 3) ^ corner.wrapping_mul(0x9E37_79B9);
+    (value % 5) as i16 - 2
+}
+
+fn progress(distance: i16, radius: i16) -> u16 {
+    if radius <= 0 || distance >= radius {
+        return 256;
+    }
+    if distance <= 0 {
+        return 0;
+    }
+
+    (distance as u16) * 256 / radius as u16
+}
+
+fn smoothstep(value: u16) -> u16 {
+    let value = u64::from(value.min(256));
+    ((3 * value * value * 256).saturating_sub(2 * value * value * value) / 65_536) as u16
+}
+
+fn scale_opacity(opacity: u16, coverage: u16) -> u16 {
+    ((u32::from(opacity) * u32::from(coverage) + 128) / 256) as u16
+}
+
+fn pixel_luminance(pixel: &[u8]) -> u8 {
+    ((u16::from(pixel[0]) * 54 + u16::from(pixel[1]) * 183 + u16::from(pixel[2]) * 19 + 128) / 256)
+        as u8
+}
+
+fn scale_channel(channel: u8, factor: u16) -> u8 {
+    ((u16::from(channel) * factor + 128) / 256) as u8
+}
+
+fn mix_channel(source: u8, target: u8, amount: u16) -> u8 {
+    ((u16::from(source) * (256 - amount) + u16::from(target) * amount + 128) / 256) as u8
+}
+
+fn mix_color(source: [u8; 3], target: [u8; 3], amount: u16) -> [u8; 3] {
+    [
+        mix_channel(source[0], target[0], amount),
+        mix_channel(source[1], target[1], amount),
+        mix_channel(source[2], target[2], amount),
+    ]
+}
+
+fn mix_u16(source: u16, target: u16, amount: u16) -> u16 {
+    ((u32::from(source) * u32::from(256 - amount) + u32::from(target) * u32::from(amount) + 128)
+        / 256) as u16
+}
+
+fn lerp_u16(source: u16, target: u16, amount: usize, scale: usize) -> u16 {
+    let scale = scale.max(1) as u32;
+    let amount = amount.min(scale as usize) as u32;
+    ((u32::from(source) * (scale - amount) + u32::from(target) * amount + scale / 2) / scale) as u16
+}
+
+fn lerp_i16(source: i16, target: i16, amount: usize, scale: usize) -> i16 {
+    let scale = scale.max(1) as i32;
+    let amount = amount.min(scale as usize) as i32;
+    ((i32::from(source) * (scale - amount) + i32::from(target) * amount + scale / 2) / scale) as i16
 }

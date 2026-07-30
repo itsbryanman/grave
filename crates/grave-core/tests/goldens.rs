@@ -10,7 +10,7 @@ const FIXTURE_NOW: u64 = 235 * DAY_SECONDS + 32_100;
 const SAME_DAY_EARLY: u64 = 235 * DAY_SECONDS + 1_000;
 const SAME_DAY_LATE: u64 = 235 * DAY_SECONDS + 80_000;
 
-const MOLD_IMAGE_HASH: &str = "5f7eee4589bdfbb114220667c8faf606a71d1c280bf1b0300e47353f9de75759";
+const MOLD_IMAGE_HASH: &str = "5d523cfdf324beab8d37d53bee8a5bdbd6c1d590734f3f8c160d703144476831";
 const MOLD_TEXT_HASH: &str = "f8e850da6825cf16eadd14476a2f4686e63973bd314ab458ccbd835a81f40b31";
 const STATIC_IMAGE_HASH: &str = "da67dca1ad5be3a9fd0d9d09dd2a732b4d0e3cabe35f6061aa4a623acbbe6c1e";
 const BURNIN_IMAGE_HASH: &str = "475b25f95c2bf43af391c2284ca1317c14f91a43387460341bfac5f9151017cc";
@@ -89,6 +89,26 @@ fn mold_text_golden_is_stable() {
     };
 
     assert_eq!(hash_text(&text.body), MOLD_TEXT_HASH);
+}
+
+#[test]
+fn mold_render_is_deterministic_for_the_same_timestamp() {
+    let grave = bury(
+        &fixture_image_bytes(),
+        fixture_options(RotProfile::Mold, "image/png", "fixture.png"),
+    )
+    .expect("bury");
+    let first = render_grave(&grave, FIXTURE_NOW).expect("first render");
+    let second = render_grave(&grave, FIXTURE_NOW).expect("second render");
+
+    let RenderedPayload::Image(first_image) = first.payload else {
+        panic!("expected image render");
+    };
+    let RenderedPayload::Image(second_image) = second.payload else {
+        panic!("expected image render");
+    };
+
+    assert_eq!(hash_image(&first_image), hash_image(&second_image));
 }
 
 #[test]
