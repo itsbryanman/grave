@@ -1,0 +1,3 @@
+The repository keeps this note under glass.
+It is public, deterministic, and meant to stay exhumable.
+If the badge says otherwise, the groundskeepers should worry.

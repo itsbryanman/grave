@@ -31,6 +31,7 @@ for data you have chosen to let go.
 [![decay](https://img.shields.io/badge/decay-inevitable-black?style=flat-square)](spec/RFC-666.md)
 [![graves disturbed](https://img.shields.io/badge/graves%20disturbed-0-brightgreen?style=flat-square)](spec/RFC-666.md)
 [![mourning](https://img.shields.io/badge/mourning-accepted-6b4c8a?style=flat-square)](docs/registry.md)
+[![self decay](https://img.shields.io/endpoint?style=flat-square&url=https://itsbryanman.github.io/grave/badge/self-decay.json)](https://itsbryanman.github.io/grave/badge/self-decay.json)
 [![wasm](https://img.shields.io/badge/wasm-consecrated-4a5d43?style=flat-square)](https://itsbryanman.github.io/grave/)
 
 </div>
@@ -42,6 +43,10 @@ for data you have chosen to let go.
 Every `.grave` file decays. Deterministically. On a schedule you set at burial, accelerated
 by neglect, worn slightly by every visit, and slowed — never stopped — by mourning. Two
 strangers opening the same grave on the same day witness the same rot, byte for byte.
+
+The badge above comes from the repository's own checked-in grave at
+[`/.github/sample.grave`](.github/sample.grave). It updates from the live Pages site without a
+commit loop.
 
 The original remains untouched inside the coffin, recoverable at any time.
 

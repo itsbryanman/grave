@@ -1,16 +1,8 @@
-name: Pages
+name: Self Decay Badge
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/pages.yml
-      - .github/sample.grave
-      - .github/sample.txt
-      - crates/grave-wasm/**
-      - crates/grave-cli/examples/self_decay_badge.rs
-      - viewer/**
+  schedule:
+    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:
